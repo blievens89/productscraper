@@ -87,45 +87,41 @@ class FeedAttributeScraper:
             
             # Extract all text content for pattern matching
             page_text = soup.get_text()
+            title = attributes.get('title', '')
             
-            # Extract dimensions
-            dimensions = self.extract_dimensions(page_text)
+            # Extract dimensions (for product_detail or custom use)
+            dimensions = self.extract_dimensions(page_text, title)
             if dimensions:
-                attributes['size'] = dimensions
+                attributes['size_dimensions'] = dimensions
             
-            # Extract weight
+            # Extract weight (for shipping_weight attribute)
             weight = self.extract_weight(page_text)
             if weight:
                 attributes['weight'] = weight
             
-            # Extract colour
-            colour = self.extract_colour(page_text, soup)
+            # Extract colour (REQUIRED for apparel)
+            colour = self.extract_colour(page_text, soup, title)
             if colour:
-                attributes['colour'] = colour
+                attributes['color'] = colour
             
-            # Extract material
+            # Extract material (REQUIRED for apparel)
             material = self.extract_material(page_text)
             if material:
                 attributes['material'] = material
             
+            # Extract pattern
+            pattern = self.extract_pattern(page_text)
+            if pattern:
+                attributes['pattern'] = pattern
+            
+            # Extract size (for apparel size attribute)
+            size = self.extract_size(page_text, title)
+            if size:
+                attributes['size'] = size
+            
             # Extract table data if available
             table_data = self.extract_table_data(soup)
             attributes.update(table_data)
-            
-            # Extract motor/power info
-            motor = self.extract_motor_info(page_text)
-            if motor:
-                attributes['motor'] = motor
-            
-            # Extract warranty
-            warranty = self.extract_warranty(page_text)
-            if warranty:
-                attributes['warranty'] = warranty
-            
-            # Extract brand if present
-            brand = self.extract_brand(page_text, soup)
-            if brand:
-                attributes['brand'] = brand
             
             return attributes
             
@@ -136,19 +132,39 @@ class FeedAttributeScraper:
             attributes['error'] = f"Processing error: {str(e)}"
             return attributes
     
-    def extract_dimensions(self, text: str) -> Optional[str]:
+    def extract_dimensions(self, text: str, title: str = "") -> Optional[str]:
         """Extract product dimensions in various formats"""
+        # Combine text sources
+        search_text = f"{title} {text}"
+        
         patterns = [
+            # Metric with labels (152cm (L) x 76cm (W) x 80cm (H))
             r'(\d+(?:\.\d+)?)\s*(?:cm|mm|m)\s*\(L\)\s*x\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m)\s*\(W\)\s*x\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m)\s*\(H\)',
-            r'(?:Dimensions?|Size):\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m)',
-            r'(\d+(?:\.\d+)?)\s*(?:cm|mm|m)\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m)\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m)',
-            r'(?:Table size|Product size):\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m)\s*\(L\)\s*x\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m)\s*\(W\)\s*x\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m)',
+            # Metric dimensions (2.72 x 11m, 152 x 76 x 80cm)
+            r'(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(?:x\s*(\d+(?:\.\d+)?))?\s*(?:cm|mm|m)\b',
+            # Imperial dimensions (107" x 36ft)
+            r'(\d+(?:\.\d+)?)\s*(?:"|\'|inch|inches|in)\s*x\s*(\d+(?:\.\d+)?)\s*(?:ft|feet|\')',
+            # With "x" or "×" (152 x 76 x 80 cm)
+            r'(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(?:[xX×]\s*(\d+(?:\.\d+)?))?\s*(?:cm|mm|m|inches?|ft)\b',
+            # Dimensions: or Size: prefix
+            r'(?:Dimensions?|Size|Measurements?):\s*(\d+(?:\.\d+)?)\s*(?:x|×)\s*(\d+(?:\.\d+)?)\s*(?:(?:x|×)\s*(\d+(?:\.\d+)?))?\s*(?:cm|mm|m|inches?|ft)?',
+            # Table size format
+            r'(?:Table size|Product size|Paper size):\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m)\s*(?:\(L\))?\s*x\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m)',
+            # Width x Height x Depth
+            r'(?:Width|W):\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m|").*?(?:Height|H):\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m|").*?(?:Depth|D):\s*(\d+(?:\.\d+)?)\s*(?:cm|mm|m|")',
+            # Single dimension formats
+            r'(\d+(?:\.\d+)?)\s*(?:cm|mm|m)\s*(?:wide|width|height|tall|long|length)',
         ]
         
         for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+            match = re.search(pattern, search_text, re.IGNORECASE)
             if match:
-                return ' x '.join(match.groups()) + ' cm'
+                dims = [g for g in match.groups() if g]
+                if dims:
+                    # Try to extract unit
+                    unit_match = re.search(r'(cm|mm|m|inches?|in|ft|feet)', match.group(0), re.IGNORECASE)
+                    unit = unit_match.group(1) if unit_match else 'cm'
+                    return ' x '.join(dims) + f' {unit}'
         
         return None
     
@@ -166,30 +182,49 @@ class FeedAttributeScraper:
         
         return None
     
-    def extract_colour(self, text: str, soup: BeautifulSoup) -> Optional[str]:
+    def extract_colour(self, text: str, soup: BeautifulSoup, title: str = "") -> Optional[str]:
         """Extract product colour"""
+        # Combine sources
+        search_text = f"{title} {text}"
+        
+        # Expanded colour list
         colours = [
             'black', 'white', 'red', 'blue', 'green', 'yellow', 'orange', 
             'purple', 'pink', 'brown', 'grey', 'gray', 'silver', 'gold',
-            'navy', 'beige', 'cream', 'multicolour', 'multi-colour'
+            'navy', 'beige', 'cream', 'multicolour', 'multi-colour', 'turquoise',
+            'cyan', 'magenta', 'maroon', 'olive', 'teal', 'lime', 'indigo',
+            'violet', 'coral', 'salmon', 'khaki', 'burgundy', 'champagne',
+            'bronze', 'copper', 'rose', 'mint', 'lavender', 'peach', 'cherry',
+            'ivory', 'pearl', 'charcoal', 'slate', 'emerald', 'sapphire', 'ruby'
         ]
         
-        # Look in specific areas first
+        # Look for explicit colour mentions with patterns
         colour_patterns = [
             r'(?:Colour|Color):\s*([A-Za-z\s\-]+)',
-            r'(?:Available in|Finish):\s*([A-Za-z\s\-]+)',
+            r'(?:Available in|Finish|Shade):\s*([A-Za-z\s\-]+)',
+            r'([A-Za-z]+)\s+(?:Seamless|Background|Paper|Fabric|Material)',
         ]
         
         for pattern in colour_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+            match = re.search(pattern, search_text, re.IGNORECASE)
             if match:
                 colour_text = match.group(1).strip().lower()
                 for colour in colours:
                     if colour in colour_text:
                         return colour.capitalize()
         
-        # Look for colour mentions in text
-        text_lower = text.lower()
+        # Look for RGB values
+        rgb_pattern = r'RGB\s*Values?:\s*\((\d+),\s*(\d+),\s*(\d+)\)'
+        rgb_match = re.search(rgb_pattern, text, re.IGNORECASE)
+        if rgb_match:
+            # Try to find a colour name near the RGB value
+            context = text[max(0, rgb_match.start()-100):rgb_match.end()+50]
+            for colour in colours:
+                if re.search(rf'\b{colour}\b', context, re.IGNORECASE):
+                    return colour.capitalize()
+        
+        # Look for colour names in title or general text
+        text_lower = search_text.lower()
         for colour in colours:
             if re.search(rf'\b{colour}\b', text_lower):
                 return colour.capitalize()
@@ -201,14 +236,23 @@ class FeedAttributeScraper:
         materials = [
             'MDF', 'wood', 'metal', 'steel', 'aluminium', 'aluminum', 
             'plastic', 'PVC', 'fabric', 'leather', 'foam', 'rubber',
-            'glass', 'ceramic', 'carbon', 'composite', 'nylon', 'polyester'
+            'glass', 'ceramic', 'carbon', 'composite', 'nylon', 'polyester',
+            'paper', 'cardboard', 'cotton', 'wool', 'silk', 'linen',
+            'vinyl', 'acrylic', 'resin', 'bamboo', 'oak', 'pine', 'mahogany',
+            'stainless steel', 'brass', 'chrome', 'titanium', 'fiberglass'
         ]
         
         # Look for explicit material mentions
-        pattern = r'(?:Construction|Material|Made from):\s*([A-Za-z\s\-/]+)'
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
+        material_patterns = [
+            r'(?:Construction|Material|Made from|Manufactured from):\s*([A-Za-z\s\-/]+)',
+            r'(?:^|\s)(\d+%\s*recycled\s+[a-z]+)',
+            r'(?:high quality|premium)\s+([a-z]+\s+paper)',
+        ]
+        
+        for pattern in material_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
         
         # Look for material keywords
         text_lower = text.lower()
@@ -219,6 +263,86 @@ class FeedAttributeScraper:
         
         if found_materials:
             return ', '.join(found_materials[:3])
+        
+        return None
+    
+    def extract_pattern(self, text: str) -> Optional[str]:
+        """Extract product pattern"""
+        patterns_list = [
+            'striped', 'stripes', 'polka dot', 'floral', 'paisley', 'plaid',
+            'checkered', 'checked', 'chevron', 'geometric', 'animal print',
+            'leopard', 'zebra', 'camouflage', 'camo', 'solid', 'plain'
+        ]
+        
+        # Look for explicit pattern mentions
+        pattern_pattern = r'(?:Pattern):\s*([A-Za-z\s\-]+)'
+        match = re.search(pattern_pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        
+        # Look for pattern keywords
+        text_lower = text.lower()
+        for pattern_name in patterns_list:
+            if re.search(rf'\b{pattern_name}\b', text_lower):
+                return pattern_name.capitalize()
+        
+        return None
+    
+    def extract_size(self, text: str, title: str = "") -> Optional[str]:
+        """Extract apparel/product size (S/M/L, numerical sizes, etc)"""
+        search_text = f"{title} {text}"
+        
+        # Apparel sizes
+        apparel_patterns = [
+            r'\b((?:XX?|[23X])?[SML](?:arge|edium|mall)?)\b',  # XS, S, M, L, XL, XXL, etc
+            r'\bsize:?\s*([A-Z0-9\-/]+)\b',
+            r'\b(\d+(?:\.\d+)?)\s*(?:UK|US|EU)\b',  # UK 10, US 8, EU 42
+            r'\bone size\b',
+            r'\bOSFA\b',  # One Size Fits All
+        ]
+        
+        for pattern in apparel_patterns:
+            match = re.search(pattern, search_text, re.IGNORECASE)
+            if match:
+                return match.group(1) if match.groups() else match.group(0)
+        
+        return None
+    
+    def extract_gsm(self, text: str) -> Optional[str]:
+        """Extract GSM (paper weight/density)"""
+        pattern = r'(\d+)\s*GSM'
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return f"{match.group(1)} GSM"
+        return None
+    
+    def extract_gtin(self, text: str, soup: BeautifulSoup) -> Optional[str]:
+        """Extract GTIN/EAN/UPC/Barcode"""
+        patterns = [
+            r'(?:GTIN|EAN|UPC|Barcode):\s*(\d{8,14})',
+            r'(?:Product Code|Item Code|SKU):\s*([A-Z0-9\-]+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        
+        # Look for structured data
+        script_tags = soup.find_all('script', type='application/ld+json')
+        for script in script_tags:
+            try:
+                import json
+                data = json.loads(script.string)
+                if isinstance(data, dict):
+                    if 'gtin' in data:
+                        return data['gtin']
+                    if 'gtin13' in data:
+                        return data['gtin13']
+                    if 'sku' in data:
+                        return data['sku']
+            except:
+                pass
         
         return None
     
@@ -308,14 +432,15 @@ def main():
         
         st.markdown("---")
         st.markdown("""
-        ### What gets extracted:
-        - ✅ Size/Dimensions
-        - ✅ Weight
-        - ✅ Colour
-        - ✅ Material
-        - ✅ Motor/Power specs
-        - ✅ Warranty
-        - ✅ Brand
+        ### Google Shopping attributes extracted:
+        - ✅ **color** (required for apparel)
+        - ✅ **size** (required for apparel)
+        - ✅ **material** (required for apparel)
+        - ✅ **pattern** (optional variant)
+        - ✅ **size_dimensions** (for product_detail)
+        - ✅ **weight** (for shipping_weight)
+        
+        *Apparel = required in US, UK, DE, FR, JP, BR*
         """)
     
     # File upload
