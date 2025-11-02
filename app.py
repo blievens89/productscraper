@@ -22,39 +22,63 @@ class FeedAttributeScraper:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
         
-    def extract_urls_from_xml(self, xml_content: bytes) -> List[str]:
-        """Extract product URLs from Google Shopping XML feed"""
-        urls = []
+    def extract_products_from_xml(self, xml_content: bytes) -> List[Dict[str, str]]:
+        """Extract product data (ID, title, URL) from Google Shopping XML feed"""
+        products = []
         try:
             root = ET.fromstring(xml_content)
             
             # Handle namespace - Google Shopping feeds typically use 'g:' namespace
             namespaces = {'g': 'http://base.google.com/ns/1.0'}
             
-            # Try with namespace first
-            links = root.findall('.//g:link', namespaces)
+            # Find all items
+            items = root.findall('.//item')
             
-            # If no results, try without namespace
-            if not links:
-                links = root.findall('.//link')
-            
-            for link in links:
-                url = link.text
-                if url:
-                    # Clean CDATA and whitespace
-                    url = url.strip()
+            for item in items:
+                product = {}
+                
+                # Extract ID
+                id_elem = item.find('g:id', namespaces)
+                if id_elem is None:
+                    id_elem = item.find('id')
+                if id_elem is not None and id_elem.text:
+                    product['id'] = id_elem.text.strip()
+                
+                # Extract title
+                title_elem = item.find('g:title', namespaces)
+                if title_elem is None:
+                    title_elem = item.find('title')
+                if title_elem is not None and title_elem.text:
+                    product['title'] = title_elem.text.strip()
+                
+                # Extract link
+                link_elem = item.find('g:link', namespaces)
+                if link_elem is None:
+                    link_elem = item.find('link')
+                if link_elem is not None and link_elem.text:
+                    url = link_elem.text.strip()
                     if url.startswith('http'):
-                        urls.append(url)
+                        product['url'] = url
+                
+                # Only add if we have at least a URL
+                if 'url' in product:
+                    products.append(product)
             
-            return urls
+            return products
             
         except Exception as e:
             st.error(f"Error parsing XML: {e}")
             return []
     
-    def scrape_product_attributes(self, url: str) -> Dict[str, str]:
+    def scrape_product_attributes(self, product_data: Dict[str, str]) -> Dict[str, str]:
         """Scrape product attributes from a single product page"""
-        attributes = {'url': url}
+        # Start with existing product data (id, title, url)
+        attributes = product_data.copy()
+        url = attributes.get('url', '')
+        
+        if not url:
+            attributes['error'] = 'No URL provided'
+            return attributes
         
         try:
             response = self.session.get(url, timeout=15)
@@ -308,27 +332,28 @@ def main():
         # Initialize scraper
         scraper = FeedAttributeScraper()
         
-        # Extract URLs
-        with st.spinner("Extracting URLs from feed..."):
-            urls = scraper.extract_urls_from_xml(xml_content)
+        # Extract products with ID, title, and URL
+        with st.spinner("Extracting products from feed..."):
+            products = scraper.extract_products_from_xml(xml_content)
         
-        if not urls:
-            st.error("❌ No URLs found in the XML feed. Please check your file format.")
-            st.info("Expected format: `<g:link>` or `<link>` tags with product URLs")
+        if not products:
+            st.error("❌ No products found in the XML feed. Please check your file format.")
+            st.info("Expected format: `<item>` tags with `<g:id>`, `<g:title>`, and `<g:link>` elements")
             return
         
-        st.success(f"✅ Found {len(urls)} product URLs in feed")
+        st.success(f"✅ Found {len(products)} products in feed")
         
         # Apply limit if set
-        if max_urls > 0 and max_urls < len(urls):
-            urls = urls[:max_urls]
-            st.info(f"ℹ️ Processing first {max_urls} URLs only (as per settings)")
+        if max_urls > 0 and max_urls < len(products):
+            products = products[:max_urls]
+            st.info(f"ℹ️ Processing first {max_urls} products only (as per settings)")
         
-        # Preview URLs
-        with st.expander("📋 Preview URLs to be scraped"):
-            st.text("\n".join(urls[:10]))
-            if len(urls) > 10:
-                st.text(f"... and {len(urls) - 10} more")
+        # Preview products
+        with st.expander("📋 Preview products to be scraped"):
+            preview_df = pd.DataFrame(products[:10])
+            st.dataframe(preview_df, use_container_width=True)
+            if len(products) > 10:
+                st.text(f"... and {len(products) - 10} more")
         
         # Start scraping button
         if st.button("🚀 Start Scraping", type="primary"):
@@ -342,24 +367,38 @@ def main():
             
             all_attributes = []
             
-            # Process each URL
-            for i, url in enumerate(urls):
-                status_text.text(f"Processing {i+1}/{len(urls)}: {url[:60]}...")
+            # Process each product
+            for i, product in enumerate(products):
+                url = product.get('url', 'Unknown URL')
+                product_id = product.get('id', 'No ID')
+                status_text.text(f"Processing {i+1}/{len(products)}: {product_id} - {url[:50]}...")
                 
-                attributes = scraper.scrape_product_attributes(url)
+                attributes = scraper.scrape_product_attributes(product)
                 all_attributes.append(attributes)
                 
                 # Update progress
-                progress_bar.progress((i + 1) / len(urls))
+                progress_bar.progress((i + 1) / len(products))
                 
                 # Rate limiting
-                if i < len(urls) - 1:
+                if i < len(products) - 1:
                     time.sleep(delay)
             
             status_text.text("✅ Scraping complete!")
             
             # Create DataFrame
             df = pd.DataFrame(all_attributes)
+            
+            # Reorder columns - ID and title first, then URL, then attributes
+            priority_cols = ['id', 'title', 'url']
+            other_cols = [col for col in df.columns if col not in priority_cols and col != 'error']
+            if 'error' in df.columns:
+                column_order = priority_cols + other_cols + ['error']
+            else:
+                column_order = priority_cols + other_cols
+            
+            # Only include columns that exist
+            column_order = [col for col in column_order if col in df.columns]
+            df = df[column_order]
             
             # Calculate statistics
             total_urls = len(df)
@@ -377,7 +416,7 @@ def main():
             
             # Display attribute coverage
             st.subheader("📊 Attribute Coverage")
-            attribute_cols = [col for col in df.columns if col not in ['url', 'error']]
+            attribute_cols = [col for col in df.columns if col not in ['id', 'title', 'url', 'error']]
             coverage_data = []
             
             for col in attribute_cols:
