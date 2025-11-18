@@ -101,6 +101,33 @@ class FeedAttributeScraper:
                                 elif isinstance(image, dict) and 'url' in image:
                                     data['image_url'] = urljoin(url, image['url'])
 
+                            # Extract condition (new, refurbished, used)
+                            if 'itemCondition' in item:
+                                condition = item['itemCondition']
+                                if isinstance(condition, str):
+                                    # Handle full schema URLs or simple values
+                                    if 'NewCondition' in condition:
+                                        data['condition'] = 'new'
+                                    elif 'RefurbishedCondition' in condition:
+                                        data['condition'] = 'refurbished'
+                                    elif 'UsedCondition' in condition:
+                                        data['condition'] = 'used'
+                                    else:
+                                        data['condition'] = condition.lower()
+
+                            # Extract aggregate rating
+                            if 'aggregateRating' in item:
+                                rating = item['aggregateRating']
+                                if isinstance(rating, dict):
+                                    if 'ratingValue' in rating:
+                                        data['rating'] = str(rating['ratingValue'])
+                                    if 'reviewCount' in rating:
+                                        data['review_count'] = str(rating['reviewCount'])
+
+                            # Extract category
+                            if 'category' in item:
+                                data['product_type'] = item['category']
+
                             # Extract additional product properties
                             if 'additionalProperty' in item:
                                 props = item['additionalProperty']
@@ -114,6 +141,17 @@ class FeedAttributeScraper:
                                                 data['size_dimensions'] = prop['value']
                                             elif 'warranty' in prop_name and not data.get('warranty'):
                                                 data['warranty'] = prop['value']
+                                            elif 'energy' in prop_name:
+                                                data['energy_efficiency_class'] = prop['value']
+
+                            # Extract audience (age group, gender)
+                            if 'audience' in item:
+                                audience = item['audience']
+                                if isinstance(audience, dict):
+                                    if 'suggestedGender' in audience:
+                                        data['gender'] = audience['suggestedGender']
+                                    if 'suggestedMinAge' in audience:
+                                        data['age_group'] = audience['suggestedMinAge']
             except (json.JSONDecodeError, AttributeError, KeyError):
                 continue
 
@@ -423,6 +461,63 @@ class FeedAttributeScraper:
                 if warranty:
                     attributes['warranty'] = warranty
 
+            # Condition (new, refurbished, used)
+            if not attributes.get('condition'):
+                condition = self.extract_condition(page_text, soup)
+                if condition:
+                    attributes['condition'] = condition
+
+            # Age group (for apparel/toys)
+            if not attributes.get('age_group'):
+                age_group = self.extract_age_group(page_text, title)
+                if age_group:
+                    attributes['age_group'] = age_group
+
+            # Gender (for apparel)
+            if not attributes.get('gender'):
+                gender = self.extract_gender(page_text, title)
+                if gender:
+                    attributes['gender'] = gender
+
+            # Multipack quantity
+            multipack = self.extract_multipack(page_text, title)
+            if multipack:
+                attributes['multipack'] = multipack
+
+            # Sale price (if different from regular price)
+            if not attributes.get('sale_price'):
+                sale_price = self.extract_sale_price(page_text, soup)
+                if sale_price:
+                    attributes['sale_price'] = sale_price
+
+            # Energy efficiency
+            if not attributes.get('energy_efficiency_class'):
+                energy = self.extract_energy_efficiency(page_text, soup)
+                if energy:
+                    attributes['energy_efficiency_class'] = energy
+
+            # Shipping dimensions (separate from product dimensions)
+            shipping_dims = self.extract_shipping_dimensions(page_text)
+            if shipping_dims:
+                attributes['shipping_dimensions'] = shipping_dims
+
+            # Additional images
+            main_image = attributes.get('image_url', '')
+            additional_images = self.extract_additional_images(soup, url, main_image)
+            if additional_images:
+                attributes['additional_image_link'] = ', '.join(additional_images)
+
+            # Product highlights
+            highlights = self.extract_product_highlights(soup)
+            if highlights:
+                attributes['product_highlight'] = ' | '.join(highlights)
+
+            # Category-specific attributes (electronics, books, furniture, etc.)
+            category_attrs = self.extract_category_specific_attributes(page_text, soup, title)
+            for key, value in category_attrs.items():
+                if not attributes.get(key):
+                    attributes[key] = value
+
             # GSM for paper products
             gsm = self.extract_gsm(page_text)
             if gsm:
@@ -685,7 +780,241 @@ class FeedAttributeScraper:
         if match:
             return match.group(1).strip()
         return None
-    
+
+    def extract_condition(self, text: str, soup: BeautifulSoup) -> Optional[str]:
+        """Extract product condition (new, refurbished, used)"""
+        condition_patterns = [
+            r'(?:Condition|Item Condition):\s*(new|refurbished|used|open box|like new)',
+            r'\b(brand new|pre-owned|certified refurbished)\b',
+        ]
+
+        for pattern in condition_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                condition = match.group(1).lower()
+                if 'new' in condition:
+                    return 'new'
+                elif 'refurbished' in condition:
+                    return 'refurbished'
+                elif 'used' in condition or 'pre-owned' in condition:
+                    return 'used'
+                elif 'open box' in condition:
+                    return 'refurbished'
+
+        return 'new'  # Default to new
+
+    def extract_age_group(self, text: str, title: str = "") -> Optional[str]:
+        """Extract age group (adult, kids, toddler, infant, newborn)"""
+        search_text = f"{title} {text}".lower()
+
+        age_groups = {
+            'newborn': ['newborn', '0-3 months', '0-6 months'],
+            'infant': ['infant', 'baby', '6-12 months', '12-18 months'],
+            'toddler': ['toddler', '2t', '3t', '4t', '18-24 months'],
+            'kids': ['kids', 'children', 'child', 'youth', 'boys', 'girls', '5-6 years', '7-8 years'],
+            'adult': ['adult', 'men', 'women', 'unisex adult'],
+        }
+
+        for age_group, keywords in age_groups.items():
+            for keyword in keywords:
+                if re.search(rf'\b{keyword}\b', search_text):
+                    return age_group
+
+        return None
+
+    def extract_gender(self, text: str, title: str = "") -> Optional[str]:
+        """Extract gender (male, female, unisex)"""
+        search_text = f"{title} {text}".lower()
+
+        if re.search(r"\b(men's|mens|male|for men)\b", search_text):
+            return 'male'
+        elif re.search(r"\b(women's|womens|female|for women|ladies)\b", search_text):
+            return 'female'
+        elif re.search(r'\b(unisex|for all|gender neutral)\b', search_text):
+            return 'unisex'
+        elif re.search(r"\b(boys|boy's)\b", search_text):
+            return 'male'
+        elif re.search(r"\b(girls|girl's)\b", search_text):
+            return 'female'
+
+        return None
+
+    def extract_multipack(self, text: str, title: str = "") -> Optional[str]:
+        """Extract multipack quantity (pack of X, bundle)"""
+        search_text = f"{title} {text}"
+
+        patterns = [
+            r'(?:pack of|set of|bundle of|quantity)\s*(\d+)',
+            r'(\d+)\s*(?:pack|pc|piece|count)\b',
+            r'(\d+)\s*x\s*\d+',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, search_text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+
+        return None
+
+    def extract_additional_images(self, soup: BeautifulSoup, url: str, main_image: str = "") -> List[str]:
+        """Extract additional product images"""
+        additional_images = []
+
+        gallery_selectors = [
+            {'class': re.compile(r'product-gallery|image-gallery|thumbnail|product-thumb', re.I)},
+            {'data-image': True},
+            {'data-zoom-image': True},
+        ]
+
+        for selector in gallery_selectors:
+            imgs = soup.find_all('img', attrs=selector)
+            for img in imgs:
+                src = img.get('src') or img.get('data-src') or img.get('data-zoom-image')
+                if src:
+                    full_url = urljoin(url, src)
+                    if full_url != main_image and full_url not in additional_images:
+                        if 'thumb' not in src.lower() or len(additional_images) < 3:
+                            additional_images.append(full_url)
+
+        return additional_images[:10]
+
+    def extract_shipping_dimensions(self, text: str) -> Optional[str]:
+        """Extract shipping dimensions (separate from product dimensions)"""
+        patterns = [
+            r'(?:Shipping|Package|Box) (?:Dimensions|Size):\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(?:cm|in|inches)',
+            r'(?:Package) (?:L|Length):\s*(\d+(?:\.\d+)?)[^\d]+(?:W|Width):\s*(\d+(?:\.\d+)?)[^\d]+(?:H|Height):\s*(\d+(?:\.\d+)?)',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                dims = [match.group(1), match.group(2), match.group(3)]
+                unit_match = re.search(r'(cm|in|inches)', match.group(0), re.IGNORECASE)
+                unit = unit_match.group(1) if unit_match else 'cm'
+                return ' x '.join(dims) + f' {unit}'
+
+        return None
+
+    def extract_category_specific_attributes(self, text: str, soup: BeautifulSoup, title: str = "") -> Dict[str, str]:
+        """Extract category-specific attributes (electronics, books, furniture, etc.)"""
+        attributes = {}
+        search_text = f"{title} {text}".lower()
+
+        # Electronics
+        if any(keyword in search_text for keyword in ['laptop', 'computer', 'tablet', 'phone', 'smartphone', 'pc']):
+            cpu_match = re.search(r'(Intel Core i[3579]|AMD Ryzen [3579]|Apple M\d|Snapdragon \d+)', text, re.IGNORECASE)
+            if cpu_match:
+                attributes['processor'] = cpu_match.group(1)
+
+            ram_match = re.search(r'(\d+)\s*GB\s*(?:RAM|Memory)', text, re.IGNORECASE)
+            if ram_match:
+                attributes['ram'] = f"{ram_match.group(1)}GB"
+
+            storage_match = re.search(r'(\d+)\s*(GB|TB)\s*(?:SSD|HDD|Storage|ROM)', text, re.IGNORECASE)
+            if storage_match:
+                attributes['storage'] = f"{storage_match.group(1)}{storage_match.group(2)}"
+
+            screen_match = re.search(r'(\d+(?:\.\d+)?)["\']?\s*(?:inch|in|screen|display)', text, re.IGNORECASE)
+            if screen_match:
+                attributes['screen_size'] = f"{screen_match.group(1)} inches"
+
+        # Books
+        if any(keyword in search_text for keyword in ['book', 'novel', 'paperback', 'hardcover', 'ebook']):
+            author_match = re.search(r'(?:by|author|written by)\s*([A-Z][a-z]+\s+[A-Z][a-z]+)', text)
+            if author_match:
+                attributes['author'] = author_match.group(1)
+
+            isbn_match = re.search(r'ISBN[:\s]*(\d{10}|\d{13})', text, re.IGNORECASE)
+            if isbn_match:
+                attributes['isbn'] = isbn_match.group(1)
+
+            pages_match = re.search(r'(\d+)\s*pages?', text, re.IGNORECASE)
+            if pages_match:
+                attributes['pages'] = pages_match.group(1)
+
+            if 'hardcover' in search_text:
+                attributes['format'] = 'Hardcover'
+            elif 'paperback' in search_text:
+                attributes['format'] = 'Paperback'
+            elif 'ebook' in search_text or 'kindle' in search_text:
+                attributes['format'] = 'eBook'
+
+        # Furniture
+        if any(keyword in search_text for keyword in ['chair', 'table', 'desk', 'sofa', 'couch', 'bed', 'furniture']):
+            if re.search(r'assembly required|requires assembly|easy assembly', text, re.IGNORECASE):
+                attributes['assembly_required'] = 'yes'
+            elif re.search(r'no assembly|fully assembled|pre-assembled', text, re.IGNORECASE):
+                attributes['assembly_required'] = 'no'
+
+            capacity_match = re.search(r'(?:weight capacity|holds up to|supports)\s*(\d+)\s*(?:kg|lbs?|pounds)', text, re.IGNORECASE)
+            if capacity_match:
+                attributes['weight_capacity'] = f"{capacity_match.group(1)} lbs"
+
+        # Clothing fit type
+        if any(keyword in search_text for keyword in ['shirt', 't-shirt', 'pants', 'jeans', 'dress', 'jacket']):
+            if re.search(r'\bslim fit\b', search_text):
+                attributes['fit_type'] = 'Slim'
+            elif re.search(r'\bregular fit\b', search_text):
+                attributes['fit_type'] = 'Regular'
+            elif re.search(r'\brelaxed fit\b', search_text):
+                attributes['fit_type'] = 'Relaxed'
+            elif re.search(r'\boversize\b', search_text):
+                attributes['fit_type'] = 'Oversized'
+
+        return attributes
+
+    def extract_sale_price(self, text: str, soup: BeautifulSoup) -> Optional[str]:
+        """Extract sale price (different from regular price)"""
+        sale_selectors = [
+            {'class': re.compile(r'sale-price|special-price|discount-price|promo-price', re.I)},
+            {'id': re.compile(r'sale-price|special-price', re.I)},
+        ]
+
+        for selector in sale_selectors:
+            elem = soup.find(attrs=selector)
+            if elem:
+                text_content = elem.get_text().strip()
+                price_match = re.search(r'[$£€]\s*(\d+[,\.]?\d*\.?\d+)', text_content)
+                if price_match:
+                    return price_match.group(0).strip()
+
+        was_now_match = re.search(r'(?:Was|Now|Sale):\s*([$£€]\s*\d+[,\.]?\d*\.?\d+)', text, re.IGNORECASE)
+        if was_now_match:
+            return was_now_match.group(1)
+
+        return None
+
+    def extract_energy_efficiency(self, text: str, soup: BeautifulSoup) -> Optional[str]:
+        """Extract energy efficiency class (A+++, A++, A+, A, B, C, D, E, F, G)"""
+        pattern = r'Energy (?:Efficiency )?(?:Class|Rating|Label)?:?\s*([A-G]\+*)'
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+
+        energy_img = soup.find('img', attrs={'alt': re.compile(r'energy', re.I)})
+        if energy_img:
+            alt_text = energy_img.get('alt', '')
+            class_match = re.search(r'([A-G]\+*)', alt_text, re.IGNORECASE)
+            if class_match:
+                return class_match.group(1).upper()
+
+        return None
+
+    def extract_product_highlights(self, soup: BeautifulSoup) -> Optional[List[str]]:
+        """Extract product highlights/key features"""
+        highlights = []
+
+        highlight_containers = soup.find_all(['ul', 'ol'], class_=re.compile(r'features?|highlights?|key-points?|benefits?', re.I))
+
+        for container in highlight_containers:
+            items = container.find_all('li')
+            for item in items[:5]:
+                text = item.get_text(strip=True)
+                if text and len(text) > 10 and len(text) < 150:
+                    highlights.append(text)
+
+        return highlights if highlights else None
+
     def extract_table_data(self, soup: BeautifulSoup) -> Dict[str, str]:
         """Extract structured data from tables if present"""
         data = {}
@@ -771,16 +1100,20 @@ def main():
     
     st.title("🛍️ Shopping Feed Attribute Scraper")
     st.markdown("""
-    Upload your Google Shopping XML feed to extract comprehensive product attributes from any e-commerce website.
+    Extract **50+ comprehensive product attributes** from any e-commerce website for Google Shopping feeds.
 
     **Intelligent multi-source extraction:**
-    - 🎯 Structured data (JSON-LD schema)
-    - 🏷️ Meta tags (Open Graph, Twitter Cards)
-    - 🔍 Smart HTML parsing with CSS selectors
-    - 📊 Product specification tables
-    - 📝 Pattern-based text extraction (fallback)
+    - 🎯 Structured data (JSON-LD schema) - Best coverage
+    - 🏷️ Meta tags (Open Graph, Twitter Cards) - Fallback
+    - 🔍 Smart HTML parsing with CSS selectors - Adaptive
+    - 📊 Product specification tables - Detailed specs
+    - 📝 Pattern-based text extraction - Final fallback
 
-    Works across different e-commerce platforms automatically!
+    **Automatically extracts:** prices, images, descriptions, brands, SKUs, ratings, dimensions, weights,
+    apparel details (color/size/material/fit), electronics specs (CPU/RAM/storage), book info (author/ISBN),
+    furniture details (assembly/capacity), energy ratings, multipacks, and much more!
+
+    Works across **all e-commerce platforms** automatically - Shopify, WooCommerce, Magento, custom sites, and more!
     """)
     
     # Sidebar configuration
@@ -807,31 +1140,43 @@ def main():
         
         st.markdown("---")
         st.markdown("""
-        ### Attributes extracted:
+        ### Comprehensive Attributes Extracted:
 
         **Core Product Data:**
-        - ✅ **title** - Product name
-        - ✅ **description** - Product description
-        - ✅ **price** - Product price
-        - ✅ **image_url** - Main product image
-        - ✅ **brand** - Brand name
-        - ✅ **sku** / **gtin** - Product codes
+        - ✅ **title**, **description**, **price**, **sale_price**
+        - ✅ **image_url**, **additional_image_link**
+        - ✅ **brand**, **sku**, **gtin**, **mpn**
+        - ✅ **condition** (new/refurbished/used)
+        - ✅ **availability**, **currency**
 
-        **Google Shopping (Apparel):**
-        - ✅ **color** (required)
-        - ✅ **size** (required)
-        - ✅ **material** (required)
-        - ✅ **pattern** (optional)
+        **Product Categorization:**
+        - ✅ **product_type** - Category
+        - ✅ **product_highlight** - Key features
 
-        **Physical Attributes:**
+        **Apparel & Variants:**
+        - ✅ **color**, **size**, **material**, **pattern**
+        - ✅ **age_group** (adult/kids/toddler/infant)
+        - ✅ **gender** (male/female/unisex)
+        - ✅ **fit_type** (slim/regular/relaxed)
+
+        **Physical Properties:**
         - ✅ **size_dimensions** - Product dimensions
-        - ✅ **weight** - Shipping weight
+        - ✅ **shipping_dimensions** - Package size
+        - ✅ **weight** - Product/shipping weight
 
-        **Additional:**
-        - ✅ **warranty** - Warranty info
-        - ✅ **availability** - Stock status
+        **Product Details:**
+        - ✅ **multipack** - Bundle quantity
+        - ✅ **energy_efficiency_class**
+        - ✅ **rating**, **review_count**
+        - ✅ **warranty**
 
-        *Uses structured data (JSON-LD), meta tags, and intelligent HTML parsing*
+        **Category-Specific:**
+        - 📱 **Electronics**: processor, ram, storage, screen_size
+        - 📚 **Books**: author, isbn, pages, format
+        - 🪑 **Furniture**: assembly_required, weight_capacity
+        - 👕 **Apparel**: fit_type, care_instructions
+
+        *And more - automatically adapts to product type!*
         """)
     
     # File upload
