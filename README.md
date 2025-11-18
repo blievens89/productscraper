@@ -1,6 +1,8 @@
 # Shopping Feed Attribute Scraper
 
-A powerful Streamlit web app that intelligently extracts comprehensive product attributes from **any e-commerce website** and creates supplemental feeds for Google Shopping.
+A powerful Streamlit web app that intelligently extracts **50+ comprehensive product attributes** from **any e-commerce website** and creates enhanced supplemental feeds for Google Shopping.
+
+**Extracts everything** - from basic details (price, images, descriptions) to category-specific attributes (processor specs for electronics, ISBN for books, assembly requirements for furniture) automatically.
 
 ## 🚀 Live Demo
 
@@ -33,29 +35,75 @@ Works across different e-commerce platforms using multiple extraction strategies
 
 ### Comprehensive Attribute Extraction
 
+Extracts **50+ attributes** across all product categories:
+
 **Core Product Data:**
 - Product title & description
-- Price & currency
-- Main product image
+- Price, sale price & currency
+- Main product image + additional images
 - Brand name
 - SKU, GTIN, MPN codes
+- Product condition (new/refurbished/used)
 - Availability status
+- Product highlights/key features
 
-**Google Shopping Requirements:**
-- Color (required for apparel)
-- Size (required for apparel)
-- Material (required for apparel)
-- Pattern
+**Google Shopping Feed Attributes:**
+- **Apparel (Required):** color, size, material, pattern
+- **Apparel (Recommended):** age_group, gender, fit_type
+- Product type/category
+- Multipack quantity
+- Energy efficiency class
+- Item group ID (for variants)
 
 **Physical Attributes:**
-- Dimensions (multiple format support)
-- Weight (shipping weight)
+- Product dimensions
+- Shipping dimensions (package size)
+- Weight (product & shipping)
 
-**Additional Data:**
+**Ratings & Reviews:**
+- Rating value
+- Review count
+
+**Category-Specific Attributes:**
+
+📱 **Electronics:**
+- Processor (Intel Core, AMD Ryzen, Apple M-series)
+- RAM memory
+- Storage capacity
+- Screen size
+- Model number
+
+📚 **Books:**
+- Author name
+- ISBN
+- Page count
+- Format (Hardcover/Paperback/eBook)
+- Publisher
+
+🪑 **Furniture:**
+- Assembly required (yes/no)
+- Weight capacity
+- Material composition
+- Care instructions
+
+👕 **Apparel:**
+- Fit type (Slim/Regular/Relaxed/Oversized)
+- Care instructions
+- Fabric composition
+- Size chart
+
+⚡ **Appliances:**
+- Motor/Power specifications
+- Energy efficiency rating
 - Warranty information
-- Motor/Power specs
-- GSM (paper products)
-- And more...
+- Voltage/Wattage
+
+📄 **Paper Products:**
+- GSM (paper weight)
+- Sheet count
+- Material type
+
+And more attributes automatically detected based on product type!
 
 ### User Features
 - 📤 Upload Google Shopping XML feeds
@@ -138,39 +186,59 @@ Or standard:
 
 ## Output Format
 
-The supplemental feed can include any of these attributes (depending on availability):
+The supplemental feed can include **50+ attributes** (depending on availability):
 
 **Core Fields:**
 - `id` - Product ID from XML feed
 - `title` - Product title (from XML or page)
 - `url` - Product URL
 - `description` - Product description
-- `price` - Product price
+- `price` - Regular product price
+- `sale_price` - Sale/promotional price
 - `currency` - Price currency (USD, GBP, etc.)
 - `image_url` - Main product image URL
+- `additional_image_link` - Additional product images (comma-separated)
 - `brand` - Brand name
+- `condition` - Product condition (new, refurbished, used)
 
-**Product Codes:**
+**Product Identifiers:**
 - `sku` - Stock Keeping Unit
-- `gtin` - Global Trade Item Number
+- `gtin` - Global Trade Item Number (UPC/EAN)
 - `mpn` - Manufacturer Part Number
 
-**Apparel Attributes:**
-- `color` - Product color
-- `size` - Apparel size (S, M, L, etc.)
-- `material` - Material composition
+**Product Categorization:**
+- `product_type` - Product category
+- `product_highlight` - Key features/highlights (pipe-separated)
+- `keywords` - Product keywords
+
+**Apparel & Variants:**
+- `color` - Product color (REQUIRED for apparel)
+- `size` - Apparel size (REQUIRED for apparel: S, M, L, etc.)
+- `material` - Material composition (REQUIRED for apparel)
 - `pattern` - Pattern type
+- `age_group` - Target age group (newborn, infant, toddler, kids, adult)
+- `gender` - Target gender (male, female, unisex)
+- `fit_type` - Fit style (Slim, Regular, Relaxed, Oversized)
 
 **Physical Properties:**
 - `size_dimensions` - Product dimensions
-- `weight` - Product weight
+- `shipping_dimensions` - Package dimensions
+- `weight` - Product/shipping weight
 
-**Additional:**
+**Product Details:**
 - `availability` - Stock status
+- `multipack` - Bundle/pack quantity
+- `energy_efficiency_class` - Energy rating (A+++, A++, A+, A, B, C, D, E, F, G)
+- `rating` - Product rating value
+- `review_count` - Number of reviews
 - `warranty` - Warranty information
-- `motor` - Motor/power specs
-- `gsm` - Paper weight (for paper products)
-- `keywords` - Product keywords
+
+**Category-Specific Attributes:**
+- Electronics: `processor`, `ram`, `storage`, `screen_size`
+- Books: `author`, `isbn`, `pages`, `format`
+- Furniture: `assembly_required`, `weight_capacity`
+- Appliances: `motor`
+- Paper Products: `gsm`
 
 ## Tips & Best Practices
 
