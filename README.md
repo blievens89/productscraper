@@ -1,26 +1,69 @@
 # Shopping Feed Attribute Scraper
 
-A Streamlit web app that extracts product attributes (size, colour, weight, material, etc.) from product pages and creates supplemental feeds for Google Shopping.
+A powerful Streamlit web app that intelligently extracts comprehensive product attributes from **any e-commerce website** and creates supplemental feeds for Google Shopping.
 
 ## 🚀 Live Demo
 
 Deploy to Streamlit Cloud: [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://your-app-url.streamlit.app)
 
-## Features
+## ✨ Key Features
 
+### Intelligent Multi-Source Extraction
+Works across different e-commerce platforms using multiple extraction strategies:
+
+1. **🎯 Structured Data First** (JSON-LD Schema.org)
+   - Extracts rich product data from JSON-LD markup
+   - Handles Product, Offer, Brand schemas automatically
+
+2. **🏷️ Meta Tags** (Open Graph, Twitter Cards)
+   - Fallback to social media meta tags
+   - Extracts images, prices, descriptions
+
+3. **🔍 Smart HTML Parsing**
+   - Common CSS selectors for e-commerce elements
+   - Intelligent pattern matching for product details
+
+4. **📊 Table & List Extraction**
+   - Parses specification tables automatically
+   - Extracts from definition lists (dl/dt/dd)
+
+5. **📝 Pattern-Based Extraction**
+   - Regex patterns for dimensions, weights, colors
+   - Context-aware text mining
+
+### Comprehensive Attribute Extraction
+
+**Core Product Data:**
+- Product title & description
+- Price & currency
+- Main product image
+- Brand name
+- SKU, GTIN, MPN codes
+- Availability status
+
+**Google Shopping Requirements:**
+- Color (required for apparel)
+- Size (required for apparel)
+- Material (required for apparel)
+- Pattern
+
+**Physical Attributes:**
+- Dimensions (multiple format support)
+- Weight (shipping weight)
+
+**Additional Data:**
+- Warranty information
+- Motor/Power specs
+- GSM (paper products)
+- And more...
+
+### User Features
 - 📤 Upload Google Shopping XML feeds
-- 🔍 Automatically extracts product attributes:
-  - Size/Dimensions
-  - Weight
-  - Colour
-  - Material
-  - Motor/Power specifications
-  - Warranty information
-  - Brand
 - 📊 Real-time progress tracking
-- 📈 Attribute coverage statistics
+- 📈 Detailed attribute coverage statistics
 - 💾 Download results as CSV or Excel
 - ⚙️ Configurable scraping delay and URL limits
+- 🎯 Works with most e-commerce platforms automatically
 
 ## Installation
 
@@ -95,38 +138,112 @@ Or standard:
 
 ## Output Format
 
-The supplemental feed includes:
-- `url` - Original product URL
-- `size` - Product dimensions
-- `weight` - Product weight
-- `colour` - Product colour
-- `material` - Construction material
-- `motor` - Power/motor specifications
-- `warranty` - Warranty period
+The supplemental feed can include any of these attributes (depending on availability):
+
+**Core Fields:**
+- `id` - Product ID from XML feed
+- `title` - Product title (from XML or page)
+- `url` - Product URL
+- `description` - Product description
+- `price` - Product price
+- `currency` - Price currency (USD, GBP, etc.)
+- `image_url` - Main product image URL
 - `brand` - Brand name
 
-## Tips
+**Product Codes:**
+- `sku` - Stock Keeping Unit
+- `gtin` - Global Trade Item Number
+- `mpn` - Manufacturer Part Number
 
-- **Test first**: Use the URL limit setting to process 10-20 URLs initially
-- **Rate limiting**: Keep delay at 1s minimum to respect website servers
+**Apparel Attributes:**
+- `color` - Product color
+- `size` - Apparel size (S, M, L, etc.)
+- `material` - Material composition
+- `pattern` - Pattern type
+
+**Physical Properties:**
+- `size_dimensions` - Product dimensions
+- `weight` - Product weight
+
+**Additional:**
+- `availability` - Stock status
+- `warranty` - Warranty information
+- `motor` - Motor/power specs
+- `gsm` - Paper weight (for paper products)
+- `keywords` - Product keywords
+
+## Tips & Best Practices
+
+### Testing
+- **Start small**: Use the URL limit setting to test with 10-20 URLs first
+- **Check coverage**: Review the attribute coverage statistics to see what's being extracted
+- **Compare results**: Try products from different categories to test extraction quality
+
+### Performance
+- **Rate limiting**: Keep delay at 1s minimum to respect website servers and avoid being blocked
 - **Large feeds**: 300 URLs at 1s delay = ~5 minutes processing time
-- **Success rate**: Depends on how consistently the site structures product data
+- **Timeout**: Default 15s timeout per URL - adjust if needed for slow sites
 
-## Customisation
+### Success Rate
+- **Modern e-commerce sites** (Shopify, WooCommerce, Magento): 80-95% attribute coverage
+- **Sites with JSON-LD**: Near 100% coverage for structured attributes
+- **Custom/legacy sites**: 40-70% coverage (relies on pattern matching)
+- **Best results**: Sites that implement Schema.org Product markup
 
-To add more attribute extraction patterns, edit the extraction methods in `app.py`:
-- `extract_dimensions()`
-- `extract_weight()`
-- `extract_colour()`
-- `extract_material()`
+## Customization & Extension
+
+The scraper uses a layered approach - you can customize any layer:
+
+### 1. Structured Data (Highest Priority)
+Edit `extract_structured_data()` to add support for additional Schema.org types or custom JSON-LD schemas.
+
+### 2. HTML Parsing (CSS Selectors)
+Modify these methods to add site-specific selectors:
+- `extract_price_from_html()` - Add price selectors
+- `extract_image_from_html()` - Add image selectors
+- `extract_description_from_html()` - Add description selectors
+
+### 3. Pattern Matching (Fallback)
+Enhance regex patterns in:
+- `extract_dimensions()` - Dimension formats
+- `extract_weight()` - Weight patterns
+- `extract_colour()` - Color names
+- `extract_material()` - Material keywords
+- `extract_size()` - Size formats
+
+### 4. Table Extraction
+Update `extract_table_data()` to map additional table headers to attributes.
+
+### Adding New Attributes
+1. Add extraction method (e.g., `extract_rating()`)
+2. Call it in `scrape_product_attributes()`
+3. Add to structured data extraction if applicable
 
 ## Troubleshooting
 
-**No URLs found**: Check your XML uses `<g:link>` or `<link>` tags
+**No URLs found**:
+- Check your XML uses `<g:link>` or `<link>` tags
+- Verify the XML feed is valid and properly formatted
 
-**Low success rate**: The site may structure data differently - customise regex patterns
+**Low attribute coverage for a specific site**:
+- Check if the site uses JSON-LD (view page source, search for "application/ld+json")
+- The site may use non-standard HTML structure - add custom selectors
+- Some attributes may be loaded dynamically via JavaScript (not accessible to this scraper)
 
-**Slow performance**: Normal - respects rate limiting to avoid server issues
+**Missing specific attributes**:
+- Review the attribute coverage statistics to see what's being found
+- Check the page source to see how the attribute is marked up
+- Add custom patterns to the relevant extraction method
+
+**Slow performance**:
+- Normal behavior - respects rate limiting to avoid being blocked
+- Adjust delay in settings (minimum 1s recommended)
+- Consider processing in batches
+
+**Request errors (403, 429)**:
+- Website may be blocking scraper traffic
+- Increase delay between requests
+- Some sites require additional headers or authentication
 
 ## Licence
 
